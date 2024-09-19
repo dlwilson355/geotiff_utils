@@ -1,3 +1,4 @@
 .idea/
-test_dataset/*
-!test_dataset/README.md
+tests/test_dataset/
+tests/!test_dataset/README.md
+__pycache__

@@ -1,1 +1,0 @@
-If you wish to test that GDAL and the geotiff utilities provided in this repository are working correctly, download the test dataset from [here](https://drive.google.com/drive/u/3/folders/1OxkkxI5o6K4Jlur5UI7Pw0GmSVLv1irw) and place its contents in this folder (no subdirectories).
