@@ -95,4 +95,3 @@ dependencies:
   - zstd=1.5.2=h19a0ad4_0
   - pip:
       - gdal==3.4.3
-prefix: C:\Users\dlwil\anaconda3\envs\gdal
