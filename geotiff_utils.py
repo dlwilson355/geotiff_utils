@@ -5,7 +5,8 @@ Reference 1: https://stackoverflow.com/questions/33537599/how-do-i-write-create-
 Reference 2: https://gis.stackexchange.com/questions/164853/reading-modifying-and-writing-a-geotiff-with-gdal-in-python
 Reference 3: https://gis.stackexchange.com/questions/172666/optimizing-python-gdal-readasarray
 Reference 4: https://gis.stackexchange.com/questions/53617/how-to-find-lat-lon-values-for-every-pixel-in-a-geotiff-file
-Reference 5: https://stackoverflow.com/questions/60954617/how-to-build-internal-overviews-with-python-gdal-buildoverviews
+Reference 5: https://stackoverflow.com/questions/60954617/how-to-build-internal-overviews-with-python-gdal
+-buildoverviews
 
 Since GDAL is hard to use on windows, the most reliable installation method has been to install using pip from a whl
 file here: https://www.lfd.uci.edu/~gohlke/pythonlibs/#gdal
@@ -20,8 +21,7 @@ from time import sleep
 from alive_progress import alive_bar
 from collections import defaultdict
 import numpy as np
-from osgeo import gdal
-from osgeo import osr
+from osgeo import gdal, ogr, osr
 import torch
 
 from utils.general_utils import check_required_and_keyword_args
@@ -40,7 +40,8 @@ def check_arguments(func):
 
         check_keywords = ['geotiff_filepath',
                           'read_geotiff_filepath',
-                          'write_geotiff_path']
+                          'write_geotiff_path',
+                          'shape_filepath']
         for check_keyword in check_keywords:
             if check_keyword in kwargs:
                 arg = kwargs[check_keyword]
@@ -67,18 +68,19 @@ def check_arguments(func):
                         raise AttributeError(f'If you do not pass a value for "{check_keyword}", you must pass an '
                                              f'argument for "{required_arg}".')
 
-        check_keyword = 'create_geotiff_filepath'
-        if check_keyword in kwargs:
-            arg = kwargs[check_keyword]
-            if not isinstance(arg, str):
-                raise AttributeError(f'Passed value for "{check_keyword}" was "{arg}" which is not a string.')
-            if os.path.exists(arg):
-                raise FileNotFoundError(
-                    f'Passed value for "{check_keyword}" was "{arg}" which is a filepath that already exists.')
-            if not os.path.exists(os.path.dirname(arg)):
-                raise FileNotFoundError(
-                    f'Passed value for "{check_keyword}" has directory path "{arg}" is "{os.path.dirname(arg)}" '
-                    f'which already not exists.')
+        check_keywords = ['create_geotiff_filepath', 'create_shape_filepath']
+        for check_keyword in check_keywords:
+            if check_keyword in kwargs:
+                arg = kwargs[check_keyword]
+                if not isinstance(arg, str):
+                    raise AttributeError(f'Passed value for "{check_keyword}" was "{arg}" which is not a string.')
+                if os.path.exists(arg):
+                    raise FileNotFoundError(
+                        f'Passed value for "{check_keyword}" was "{arg}" which is a filepath that already exists.')
+                if not os.path.exists(os.path.dirname(arg)):
+                    raise FileNotFoundError(
+                        f'Passed value for "{check_keyword}" has directory path "{arg}" is "{os.path.dirname(arg)}" '
+                        f'which already not exists.')
 
         check_keyword = 'data_array'
         if check_keyword in kwargs:
@@ -276,8 +278,8 @@ def check_arguments(func):
                                          f'The passed coordinates + size is "{bottom_right_coords}" but the bottom '
                                          f'right of the raster is "{(check_size[0], check_size[1])}".')
 
-
         return func(**kwargs)
+
     return wrapper
 
 
@@ -294,7 +296,8 @@ def read_from_geotiff(read_geotiff_filepath,
     Reads the data from the passed geotiff file at the passed raster band, coordinates, and size (if specified).
     The coordinates and size parameters should be (x, y) tuples. Either both or neither of these parameters should be
     None.
-    If "convert_to_pytorch_tensor_format" is True, a pytorch tensor will be returned instead of a numpy array, and the color
+    If "convert_to_pytorch_tensor_format" is True, a pytorch tensor will be returned instead of a numpy array,
+    and the color
     channel will be automatically moved to the 1st dimension, otherwise returns a numpy array with the color channel
     in the third dimension.
     If "replace_no_data_value_with" is equal to a number, the value marked as the "no data" value by the geotiff
@@ -304,8 +307,7 @@ def read_from_geotiff(read_geotiff_filepath,
     If "rescale" is a floating point number, the data array will be scaled by the ratio indicated by that number.
     If "rescale" is a tuple, the data array will be scaled to the (width, height) indicated by those numbers.
     If "normalize" is None, the data array will not be normalized.
-    If "normalize" is True, the minimum and maximum of the ENTIRE geotiff will be calculated and the data array will
-    be normalized appropriately.
+    If "normalize" is True, the data array will be normalized from 0 to 1.
     If "normalize" is set to a tuple of (min, max), those values will be used to calculate the normalized values.
     """
 
@@ -315,7 +317,7 @@ def read_from_geotiff(read_geotiff_filepath,
     num_bands = read_file.RasterCount
 
     # read in each band as an array and append it to the list of read arrays, close the geotiff after done reading data
-    for band_number in range(1, num_bands+1):
+    for band_number in range(1, num_bands + 1):
         band = read_file.GetRasterBand(band_number)
         if not coordinates and not size:
             data_array = band.ReadAsArray()
@@ -454,7 +456,7 @@ def write_to_geotiff(write_geotiff_filepath,
     """
 
     if isinstance(data_array, torch.Tensor):
-        data_array = convert_torch_tensor_to_np_array_format(data_array)
+        data_array = convert_torch_tensor_to_np_array_format(data_array.cpu())
 
     success = False
     while not success and num_tries > 0:
@@ -537,7 +539,8 @@ def read_geotiff_within_lat_lon(read_geotiff_filepath,
     coordinates.
     The top left and bottom right latitude and longitudes are a tuples of (lat, lon).
     Raster band should be an integer from 1 to N where N represents the number of raster bands.
-    If "convert_to_pytorch_tensor_format" is True, a pytorch tensor will be returned instead of a numpy array, and the color
+    If "convert_to_pytorch_tensor_format" is True, a pytorch tensor will be returned instead of a numpy array,
+    and the color
     channel will be automatically moved to the 1st dimension, otherwise returns a numpy array with the color channel
     in the third dimension.
     If "replace_no_data_value_with" is equal to a number, the value marked as the "no data" value by the geotiff
@@ -547,8 +550,7 @@ def read_geotiff_within_lat_lon(read_geotiff_filepath,
     If "rescale" is a floating point number, the data array will be scaled by the ratio indicated by that number.
     If "rescale" is a tuple, the data array will be scaled to the (width, height) indicated by those numbers.
     If "normalize" is None, the data array will not be normalized.
-    If "normalize" is True, the minimum and maximum of the ENTIRE geotiff will be calculated and the data array will
-    be normalized appropriately.
+    If "normalize" is True, the data array will be normalized from 0 to 1.
     If "normalize" is set to a tuple of (min, max), those values will be used to calculate the normalized values.
     """
 
@@ -602,6 +604,82 @@ def write_to_geotiff_within_lat_lon(write_geotiff_filepath,
                      top_left_coordinates=top_left_array_coordinates,
                      bottom_right_coordinates=bottom_right_array_coordinates,
                      num_tries=num_tries)
+
+
+@check_arguments
+def create_shapefile_from_geotiff(geotiff_filepath, create_shape_filepath):
+    """
+    Returns the path to a shapefile containing a polygon outlining the bounds of the raster data in the passed
+    geotiff file.
+
+    Modified from: https://www.programcreek.com/python/example/97859/osgeo.ogr.GetDriverByName
+    """
+
+    type_mapping = {gdal.GDT_Byte: ogr.OFTInteger,
+                    gdal.GDT_UInt16: ogr.OFTInteger,
+                    gdal.GDT_Int16: ogr.OFTInteger,
+                    gdal.GDT_UInt32: ogr.OFTInteger,
+                    gdal.GDT_Int32: ogr.OFTInteger,
+                    gdal.GDT_Float32: ogr.OFTReal,
+                    gdal.GDT_Float64: ogr.OFTReal,
+                    gdal.GDT_CInt16: ogr.OFTInteger,
+                    gdal.GDT_CInt32: ogr.OFTInteger,
+                    gdal.GDT_CFloat32: ogr.OFTReal,
+                    gdal.GDT_CFloat64: ogr.OFTReal}
+
+    ds = gdal.Open(geotiff_filepath)
+    prj = ds.GetProjection()
+    srcband = ds.GetRasterBand(1)
+    dst_layername = "Shape"
+    drv = ogr.GetDriverByName("ESRI Shapefile")
+    dst_ds = drv.CreateDataSource(create_shape_filepath)
+    srs = osr.SpatialReference(wkt=prj)
+
+    dst_layer = dst_ds.CreateLayer(dst_layername, srs=srs)
+    raster_field = ogr.FieldDefn('id', type_mapping[srcband.DataType])
+    dst_layer.CreateField(raster_field)
+    gdal.Polygonize(srcband, srcband, dst_layer, 0, [], callback=None)
+    del ds, srcband, dst_ds, dst_layer
+
+
+@check_arguments
+def dissolve_shapefile(shape_filepath, create_shape_filepath):
+    """Saves a new shapefile which contains a single polygon surrounding all the polygons in the shape filepath."""
+
+    def createDS(ds_name, ds_format, geom_type, srs):
+        drv = ogr.GetDriverByName(ds_format)
+        ds = drv.CreateDataSource(ds_name)
+        lyr_name = os.path.splitext(os.path.basename(ds_name))[0]
+        lyr = ds.CreateLayer(lyr_name, srs, geom_type)
+        return ds, lyr
+
+    def dissolve(input, output, multipoly=False):
+        ds = ogr.Open(input)
+        lyr = ds.GetLayer()
+        out_ds, out_lyr = createDS(output, ds.GetDriver().GetName(), lyr.GetGeomType(), lyr.GetSpatialRef())
+        defn = out_lyr.GetLayerDefn()
+        multi = ogr.Geometry(ogr.wkbMultiPolygon)
+        for feat in lyr:
+            if feat.geometry():
+                feat.geometry().CloseRings()  # this copies the first point to the end
+                wkt = feat.geometry().ExportToWkt()
+                multi.AddGeometryDirectly(ogr.CreateGeometryFromWkt(wkt))
+        union = multi.UnionCascaded()
+        if multipoly is False:
+            for geom in union:
+                poly = ogr.CreateGeometryFromWkb(geom.ExportToWkb())
+                feat = ogr.Feature(defn)
+                feat.SetGeometry(poly)
+                out_lyr.CreateFeature(feat)
+        else:
+            out_feat = ogr.Feature(defn)
+            out_feat.SetGeometry(union)
+            out_lyr.CreateFeature(out_feat)
+            out_ds.Destroy()
+        ds.Destroy()
+        return True
+
+    dissolve(shape_filepath, create_shape_filepath)
 
 
 @check_arguments
